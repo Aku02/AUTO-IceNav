@@ -244,8 +244,11 @@ Please consider citing our papers if you find our work useful for your research:
 @article{deschaetzen2024autoicenav,
   title={AUTO-IceNav: A Local Navigation Strategy for Autonomous Surface Ships in Broken Ice Fields},
   author={de Schaetzen, Rodrigue and Botros, Alexander and Zhong, Ninghan and Murrant, Kevin and Gash, Robert and Smith, Stephen L},
-  journal={arXiv preprint arXiv:2411.17155},
-  year={2024}
+  journal={IEEE Transactions on Robotics},
+  year={2025},
+  volume={41},
+  pages={5875-5895},
+  publisher={IEEE}
 }
 
 @inproceedings{deschaetzen2023real,
