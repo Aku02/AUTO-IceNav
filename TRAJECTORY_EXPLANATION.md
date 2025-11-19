@@ -210,9 +210,9 @@ Unlike simple waypoint following, this system:
 4. **Smooth trajectories**: Low-pass filtering prevents abrupt maneuvers
 5. **Real-time adaptation**: Continuously adapts to changing conditions
 
-## For Your RL Project
+## For RL Project
 
-If you want to replace the planner with RL:
+To replace the planner with RL:
 
 - **State Space**: Could include costmap, ship state, nearby ice positions
 - **Action Space**: Could be waypoints, or direct control inputs

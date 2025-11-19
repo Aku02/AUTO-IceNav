@@ -206,7 +206,7 @@ while running:
     plot.update(...)  # Update visualization
 ```
 
-## For Your RL/Control Project
+## For RL/Control Project
 
 ### Potential State Space
 - Ship: position (x, y), heading (ψ), velocity (u, v, r)
