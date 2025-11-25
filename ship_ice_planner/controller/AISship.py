@@ -1,10 +1,12 @@
 from asyncio import streams
 import os
+import torch
 from typing import Union, Tuple
 import pickle
 import numpy as np
 
 from ship_ice_planner.geometry.utils import Rxy
+from ship_ice_planner.controller.seanet import SeaCurrentRNN
 
 
 class PID:
@@ -23,33 +25,35 @@ class PID:
 
 class AISship:
 
-    def load_model(self, path:str) -> Tuple:
-        with open(os.path.join(path, "A_d.pkl"), "rb") as f:
-            A = pickle.load(f)
-            f.close()
-        with open(os.path.join(path, "B_u.pkl"), "rb") as f:
-            B = pickle.load(f)
-            f.close()
-        with open(os.path.join(path, "G_c.pkl"), "rb") as f:
-            G_c = pickle.load(f)
-            f.close()
-        with open(os.path.join(path, "G_w.pkl"), "rb") as f:
-            G_w = pickle.load(f)
-            f.close()
-        return A, B, G_c, G_w
-
-
-    def __init__(self, path:str):
+    def sea_dynamics_step(self, x, y):
+        # Index the sea current vector by ship center 
+        # (approx. could also interpolate over ship perimeter)
+        if self.sea_step % self.sea_step_frequency == 0 or self.sea_step == 0:
+            self.sea_x = self.seanet(self.sea_x)
+            self.sea_step += 1
+        i = int(y) % self.sea_x.shape[0]
+        j = int(x) % self.sea_x.shape[1]
+        return self.sea_noise_strength * self.sea_x[0][i][j].detach().numpy()
+        
+    def __init__(self, seamap_path:str, seanet_path:str):
         """
         Fully decoupled 3 DOF displacement vessel using first order Nomoto model
         Linear model for the 1:45 scale PSV from the NRC
         """
-        self.noise_strength = 0.1
-
+        # Loading sea model and initialization map
+        self.sea_step = 0
+        self.sea_step_frequency = 1000
+        self.sea_noise_strength = 0.1
+        self.sea_x = torch.load(seamap_path, map_location=torch.device('cpu'))
+        state_dict = torch.load(seanet_path, map_location=torch.device('cpu'))
+        self.seanet = SeaCurrentRNN(
+            hidden_size=128
+        )
+        self.seanet.load_state_dict(state_dict)
+        
         # Fixed currents, will add normal noise
         self.c = np.array([1.0, 1.0, 0])
         self.w = np.array([1.0, 1.0, 0])
-        self.A, self.B, self.Gc, self.Gw = self.load_model(path=path)
 
         # Currently considering the calibrated dynamics from original paper
         self.A = np.diag([
@@ -86,11 +90,9 @@ class AISship:
         self.mass = 90  # mass (kg)
         self.wn = np.diag([0.3, 0.3, 0.3])  # picked a bit arbitrarily
 
+
     def dynamics(self, u, v, r, u_control):
-        c_noisy = self.c + self.noise_strength * np.random.normal(size=self.c.shape)
-        w_noisy = self.w + self.noise_strength * np.random.normal(size=self.w.shape)
-        # [u, v, r] = self.A @ [u, v, r] + self.B * u_control + self.Gc @ c_noisy + self.Gw @ w_noisy
-        [u, v, r] = self.A @ [u, v, r] + self.B * u_control + c_noisy + w_noisy
+        [u, v, r] = self.A @ [u, v, r] + self.B * u_control
 
         # impose limits
         if abs(u) > self.input_lims[0]:

@@ -127,7 +127,7 @@ class SimShipDynamics:
             self.state.u_actual = self.vessel_model.u_actual  # propeller speed in RPM
 
         elif vessel_model == 'AISship':
-            self.vessel_model = AISship(path="trained_model/")
+            self.vessel_model = AISship(seamap_path="ecco4_x0.pth", seanet_path="seanet.pth")
             self.state.u_actual = np.array([0, 0, 0], float)  # propeller speed in RPS
 
         # for trajectory tracking
@@ -163,8 +163,16 @@ class SimShipDynamics:
         [u, v, r] = self.state.nu
 
         # propagate vehicle dynamics
-        if self.vessel_model_name in ['NRC_supply', 'AISship']:
+        if self.vessel_model_name == 'NRC_supply':
             [u, v, r] = self.vessel_model.dynamics(u, v, np.rad2deg(r), self.state.u_control)
+            self.state.nu = [u, v, np.deg2rad(r)]
+            self.state.u_actual = self.state.u_control  # u_actual and u_control are the same for NRC_supply
+
+        elif self.vessel_model_name == 'AISship':
+            [un, vn] = self.vessel_model.sea_dynamics_step(x, y)
+            [u, v, r] = self.vessel_model.dynamics(u, v, np.rad2deg(r), self.state.u_control)
+            u += un
+            v += vn
             self.state.nu = [u, v, np.deg2rad(r)]
             self.state.u_actual = self.state.u_control  # u_actual and u_control are the same for NRC_supply
 

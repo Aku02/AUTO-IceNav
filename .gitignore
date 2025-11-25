@@ -137,3 +137,6 @@ dmypy.json
 data/experiment_configs.pkl
 data/*.pkl
 data/*.png
+data/*.csv
+*.pth
+*.pkl
