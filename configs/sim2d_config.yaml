@@ -5,11 +5,12 @@
 output_dir: null            # root directory for storing all experiment output files
 comments: ''                # comments about experiment being performed
 map_shape:
-  - 1100                    # length of ice channel in metres
-  - 200                     # width of ice channel in metres
+  - 600                    # length of ice channel in metres
+  - 600                     # width of ice channel in metres
+map_file: "data/ice_floes_MEDEA_fram_20100629.pkl"
 plot:
-  y_axis_limit: 300         # limit in metres for the y-axis of the plot
-  show: false               # true will show planner plots
+  y_axis_limit: 600         # limit in metres for the y-axis of the plot
+  show: true               # true will show planner plots
 seed: 1
 
 ### PLANNER PARAMS
@@ -91,6 +92,9 @@ goal_offset: 30             # offset from goal line to set goal
 
 ### SHIP MODEL AND CONTROLLER PARAMS
 ship:
+  spawn_padding: 50
+  goal_pos: [600, 600]
+  start_pos: [50.0, 0.0, 1.5707963267948966]
   mass: 6000000             # mass of ship in kg
   padding: 0.0              # adds padding to ship footprint
   vertices: [[43.1, 0.0],   # vertices of the ship footprint in metres defined around (0, 0) and the ship's bow facing the positive x-axis

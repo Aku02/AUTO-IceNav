@@ -18,7 +18,7 @@ from ship_ice_planner.utils.sim_utils import (
 from ship_ice_planner.geometry.polygon import poly_area
 
 # Fracturing parameters
-FRACTURE_ENABLED = True
+FRACTURE_ENABLED = False
 FRACTURE_BASE_THRESHOLD = 1e6  # N·s (impulse threshold for small floe)
 FRACTURE_SIZE_EXPONENT = 0.5  # How fracture threshold scales with size
 FRACTURE_MIN_SIZE = 2.0  # m (minimum floe radius before it disappears)

@@ -22,6 +22,7 @@ from ship_ice_planner.geometry.utils import get_global_obs_coords
 from ship_ice_planner.utils.plot import Plot
 from ship_ice_planner.utils.utils import DotDict
 from ship_ice_planner.utils.sim_utils import *
+from ship_ice_planner.utils.sim_utils import load_real_obstacles
 from ship_ice_planner.utils.ice_fracture_ridge import (
     IceFloeState, RidgeZone, FRACTURE_ENABLED, RIDGING_ENABLED,
     fracture_ice_floe, check_ridging_conditions, create_ridge_zone,
@@ -29,7 +30,6 @@ from ship_ice_planner.utils.ice_fracture_ridge import (
     RIDGE_MIN_FLOES, RIDGE_ACCUMULATION_RATE,
     RIDGE_DECAY_TIME, RIDGE_MIN_ACTIVITY_DISTANCE
 )
-
 
 # global vars for dir/file names
 PLOT_DIR = 'sim_plots'
@@ -86,17 +86,21 @@ def sim(
     # a new path is received after a replan has been triggered
     planner_timeout = cfg.sim.get('planner_timeout', 0.0)
 
-    # get goal, start, and obstacles
-    if init_queue:
-        goal = init_queue['goal']
-        start = init_queue['ship_state']
-        obs_dicts = init_queue['obstacles']
-
+    # Load globally defined conditions
+    # cfg.map_shape
+    PADDING = cfg.ship.spawn_padding
+    goal, start = cfg.ship.goal_pos, cfg.ship.start_pos
+    
+    # Load real map
+    if cfg.map_file != None:
+        obs_dicts, _ = load_real_obstacles(cfg.map_file)
     else:
-        goal, start = cfg.ship.goal_pos, cfg.ship.start_pos
-        # generate obstacles and an associated polygon object
         obs_dicts, _ = generate_obstacles(**cfg.obstacle, seed=seed)
-
+    
+    # Shift ice floes by padding and process
+    for ob in obs_dicts:
+        ob['vertices'][:, 1] += np.array(PADDING).astype(np.int32)  # Shift y-coordinates
+        
     obstacles = [ob['vertices'] for ob in obs_dicts]
     sqrt_floe_areas = np.array([math.sqrt(poly_area(ob['vertices'])) for ob in obs_dicts])  # for drag calculation
 
@@ -177,18 +181,31 @@ def sim(
     polygons = generate_sim_obs(space, obs_dicts)
     poly_vertices = []  # generate these once
     ice_floe_states = {}  # Track floe states for fracturing
+    original_vertices_map = {}  # Map polygon idx to original LOCAL vertices (centered at origin)
     next_floe_idx = len(polygons)  # Track next available index for new floes
     for idx, p in enumerate(polygons):
         p.collision_type = 2  # for collision callbacks
-        vertices = list_vec2d_to_numpy(p.get_vertices())
+        
+        # Store ORIGINAL vertices in LOCAL coordinates (centered at origin)
+        # This matches what generate_sim_obs does: obs['vertices'] - obs['centre']
+        global_verts = obs_dicts[idx]['vertices']
+        centre = obs_dicts[idx]['centre']
+        if not isinstance(global_verts, np.ndarray):
+            global_verts = np.array(global_verts)
+        if not isinstance(centre, np.ndarray):
+            centre = np.array(centre)
+        # Convert to local coordinates (centered at origin)
+        local_verts = global_verts - centre
+        
         poly_vertices.append(
-            np.concatenate([vertices, [vertices[0]]])  # close the polygon (speeds up plotting somehow...)
+            np.concatenate([local_verts, [local_verts[0]]])  # close the polygon
         )
-        p.idx = idx  # hacky but makes it easier to keep track which polygon collided
+        original_vertices_map[idx] = local_verts
+        p.idx = idx
         
         # Initialize ice floe state for fracturing
         if FRACTURE_ENABLED:
-            floe_area = poly_area(vertices)
+            floe_area = poly_area(local_verts)
             ice_floe_states[p.idx] = IceFloeState(p, floe_area)
     
     floe_masses = np.array([poly.mass for poly in polygons])  # may differ slightly from the mass in the exp config
@@ -249,7 +266,7 @@ def sim(
     if cfg.anim.show or cfg.anim.save:
         plot = Plot(obstacles=obstacles, path=path.T, legend=False, track_fps=True, y_axis_limit=cfg.plot.y_axis_limit,
                     ship_vertices=cfg.ship.vertices, target=sim_dynamics.setpoint[:2], inf_stream=cfg.anim.inf_stream,
-                    ship_pos=state.eta, map_figsize=None, sim_figsize=(5, 5), remove_sim_ticks=True, goal=goal[1],
+                    ship_pos=state.eta, map_figsize=None, sim_figsize=(10, 10), remove_sim_ticks=True, goal=goal[1],
                     save_fig_dir=save_fig_dir, map_shape=cfg.map_shape,
                     save_animation=cfg.anim.save, anim_fps=cfg.anim.fps
                     )
@@ -338,7 +355,11 @@ def sim(
                                 if best_idx is not None:
                                     p = ice_polygons_for_planner[best_idx]
                                     used_indices.add(best_idx)
-                                    vertices = list_vec2d_to_numpy(p.get_vertices())
+                                    # Use original vertices if available
+                                    if hasattr(p, 'idx') and p.idx in original_vertices_map:
+                                        vertices = original_vertices_map[p.idx]
+                                    else:
+                                        vertices = list_vec2d_to_numpy(p.get_vertices())
                                     planner_vertices.append(
                                         np.concatenate([vertices, [vertices[0]]])
                                     )
@@ -526,6 +547,7 @@ def sim(
                         
                         # Update poly_vertices, floe_masses, and sqrt_floe_areas
                         # Match polygons to batched_data order by position to prevent visualization glitches
+                        # Use original_vertices_map for unfractured floes, Pymunk vertices for new fractured floes
                         ice_polygons_only = [p for p in polygons if p.collision_type == 2]
                         if len(ice_polygons_only) == len(batched_data):
                             # Match each batched_data body to closest polygon
@@ -549,7 +571,11 @@ def sim(
                                 if best_idx is not None:
                                     p = ice_polygons_only[best_idx]
                                     used_indices.add(best_idx)
-                                    vertices = list_vec2d_to_numpy(p.get_vertices())
+                                    # Use original vertices if available, otherwise use Pymunk vertices
+                                    if hasattr(p, 'idx') and p.idx in original_vertices_map:
+                                        vertices = original_vertices_map[p.idx]
+                                    else:
+                                        vertices = list_vec2d_to_numpy(p.get_vertices())
                                     poly_vertices.append(
                                         np.concatenate([vertices, [vertices[0]]])
                                     )
@@ -557,7 +583,10 @@ def sim(
                                     # If no match, just use first available (shouldn't happen)
                                     if len(ice_polygons_only) > i:
                                         p = ice_polygons_only[i]
-                                        vertices = list_vec2d_to_numpy(p.get_vertices())
+                                        if hasattr(p, 'idx') and p.idx in original_vertices_map:
+                                            vertices = original_vertices_map[p.idx]
+                                        else:
+                                            vertices = list_vec2d_to_numpy(p.get_vertices())
                                         poly_vertices.append(
                                             np.concatenate([vertices, [vertices[0]]])
                                         )
@@ -588,10 +617,13 @@ def sim(
                             floe_masses = np.array([poly.mass for poly in matched_polygons[:len(batched_data)]])
                             sqrt_floe_areas = np.array([math.sqrt(poly_area(list_vec2d_to_numpy(p.get_vertices()))) for p in matched_polygons[:len(batched_data)]])
                         else:
-                            # Fallback: just rebuild in polygon order
+                            # Fallback: just rebuild in polygon order, using original vertices when available
                             poly_vertices = []
                             for p in ice_polygons_only:
-                                vertices = list_vec2d_to_numpy(p.get_vertices())
+                                if hasattr(p, 'idx') and p.idx in original_vertices_map:
+                                    vertices = original_vertices_map[p.idx]
+                                else:
+                                    vertices = list_vec2d_to_numpy(p.get_vertices())
                                 poly_vertices.append(
                                     np.concatenate([vertices, [vertices[0]]])
                                 )

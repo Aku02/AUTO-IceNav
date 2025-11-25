@@ -60,6 +60,23 @@ gdown https://drive.google.com/uc?id=1DuuVJfHHxXJqVZ1KG60q_X2uK5ZoS2cS --output 
 cd test && pytest .
 ```
 
+## Realistic map generation
+You can use pre-segmented satellite images of ice floes to compute a polygon map. We identify two valid sources of data:
+- [Multi-satellite floe size distribution of Arctic sea ice 2000-2020. Hwang, B., Wang, Y., & MOSAiC Remote Sensing Team (2022)](https://data.bas.ac.uk/full-record.php?id=GB/NERC/BAS/PDC/01650)
+- [Sea-Ice Floe Segmentation Products Derived from MEDEA Imagery for 1999 through 2014 in the Canada Basin. Denton et al. (2022)](https://zenodo.org/records/6341621)
+
+First, pre-process the image file (usually a `.png`) with the module:
+```python
+  python -m ship_ice_planner.image_process.generate_poly_map --input <segmented_png> --output <pkl_file> --crop_size <max_map_size> --visualize
+```
+
+You will need to adjust your `.yaml` config file:
+- `map_shape` to `<max_map_size>`
+- `map_file` to `<pkl_file>`
+
+Alternatively, the randomly generated map from default `.pkl` data files will be loaded.
+
+
 ## Simulator
 
 This repo includes a 2D physics simulator for simulating ship-ice interactions.[^1]

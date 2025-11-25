@@ -20,9 +20,9 @@ from ship_ice_planner.geometry.utils import Rxy_3d, Rxy
 ANIM_MOVIE_FILE = 'sim.mp4'
 DEFAULT_SAVE_FIG_FORMAT = 'pdf'
 # colors
-ICE_PATCH_COLOR         = 'lightblue'  # 'white'
+ICE_PATCH_COLOR         = 'lightgrey'  # 'white'
 SHIP_PATCH_COLOR        = 'white'      # 'lightgrey'
-OPEN_WATER_COLOR        = 'white'      # 'lightblue'
+OPEN_WATER_COLOR        = 'lightblue'      # 'lightblue'
 SWATH_COLOR             = 'white'
 PLANNED_PATH_COLOR      = 'red'
 SHIP_ACTUAL_PATH_COLOR  = 'blue'
