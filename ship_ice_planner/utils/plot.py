@@ -54,6 +54,8 @@ class Plot:
             scale: float = 1,
             costmap_min_max: Tuple[float, float] = None,
             global_path: np.ndarray = None,  # can also just be the path used to warm start optim step
+            sea_currents: np.ndarray = None,  # sea current vector field (H, W, 2) or (T, H, W, 2)
+            sea_currents_subsample: int = 20,  # subsampling factor for quiver plot
             # ---- sim plot params ----
             sim_figsize=(10, 10),
             target: Tuple[float, float] = None,
@@ -82,21 +84,38 @@ class Plot:
             ##########################################
             # --- initialize the map plot --- #
             self.map_artists = []
+            self.sea_currents_subsample = sea_currents_subsample
 
-            # create the figure, either 2 subplots or 1
-            if nodes_expanded:
-                # two subplots, 1 for showing the expanded nodes from A* and 1 for the map
-                self.map_fig, [self.node_ax, self.map_ax] = plt.subplots(1, 2,
-                                                                         figsize=map_figsize,
-                                                                         sharex='all', sharey='all')
+            # create the figure with appropriate number of subplots
+            n_extra_plots = int(bool(nodes_expanded)) + int(sea_currents is not None)
+            if n_extra_plots > 0:
+                n_subplots = 1 + n_extra_plots
+                self.map_fig, axes = plt.subplots(1, n_subplots,
+                                                  figsize=(map_figsize[0] * n_subplots / 2, map_figsize[1]),
+                                                  sharex='all', sharey='all')
+                
+                ax_idx = 0
+                # assign axes based on what's provided
+                if nodes_expanded:
+                    self.node_ax = axes[ax_idx]
+                    ax_idx += 1
+                    # plot the nodes that were expanded
+                    self.node_scat = None
+                    self.create_node_plot(nodes_expanded)
+                    self.map_artists.extend([self.node_scat, self.node_ax.yaxis])
+                
+                if sea_currents is not None:
+                    self.sea_ax = axes[ax_idx]
+                    ax_idx += 1
+                    # plot the sea current vector field
+                    self.sea_quiver = None
+                    self.create_sea_currents_plot(sea_currents)
+                    self.map_artists.extend([self.sea_quiver, self.sea_ax.yaxis])
+                
+                self.map_ax = axes[ax_idx]
                 # show the ticks for the map plot
                 self.map_ax.xaxis.set_tick_params(labelbottom=True)
                 self.map_ax.yaxis.set_tick_params(labelleft=True)
-
-                # plot the nodes that were expanded
-                self.node_scat = None
-                self.create_node_plot(nodes_expanded)
-                self.map_artists.extend([self.node_scat, self.node_ax.yaxis])
 
             else:
                 self.map_fig, self.map_ax = plt.subplots(1, 1, figsize=map_figsize)
@@ -224,9 +243,16 @@ class Plot:
             self.sim_fig, self.sim_ax = plt.subplots(figsize=sim_figsize)
             self._bg = None
             self.sim_artists = []
+            self.sea_currents_subsample = sea_currents_subsample
 
             # keeps track of how far ship has traveled in subsequent steps
             self.prev_ship_pos = ship_pos
+
+            # initialize sea currents background (before obstacles so it's behind)
+            if sea_currents is not None:
+                self.sea_quiver = None
+                self._create_sim_sea_currents_plot(sea_currents)
+                self.add_artist(self.sea_quiver)
 
             # initialize artist for ice polygons
             if len(obstacles):
@@ -540,6 +566,101 @@ class Plot:
             self.node_scat.set_array(np.array(c))
             # update title
             self.node_ax.set_title('Expanded node plot (total {})'.format(len(nodes_expanded)))
+
+    def create_sea_currents_plot(self, sea_currents: np.ndarray):
+        """
+        Create a quiver plot showing sea current vector field.
+        
+        Args:
+            sea_currents: numpy array with shape (H, W, 2) or (T, H, W, 2)
+                         where the last dimension contains (u, v) velocity components
+        """
+        # Handle different input shapes
+        if sea_currents.ndim == 4:
+            # (T, H, W, 2) - take the first time step
+            field = sea_currents[0]
+        elif sea_currents.ndim == 3:
+            # (H, W, 2)
+            field = sea_currents
+        else:
+            raise ValueError(f"Expected sea_currents shape (H, W, 2) or (T, H, W, 2), got {sea_currents.shape}")
+        
+        H, W, _ = field.shape
+        
+        # Subsample for visualization (vector fields are hard to see at full resolution)
+        step = self.sea_currents_subsample
+        Y, X = np.mgrid[0:H:step, 0:W:step]
+        U = field[::step, ::step, 0]  # u component
+        V = field[::step, ::step, 1]  # v component
+        
+        # Compute magnitude for coloring
+        magnitude = np.sqrt(U**2 + V**2)
+        
+        if self.sea_quiver is None:
+            self.sea_quiver = self.sea_ax.quiver(
+                X, Y, U, V, magnitude,
+                cmap=DEFAULT_COLOR_MAP,
+                scale=None,  # auto-scale
+                alpha=0.8
+            )
+            self.sea_ax.set_title('Sea Current Vector Field')
+            self.sea_ax.set_aspect('equal')
+            divider = make_axes_locatable(self.sea_ax)
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            cbar = self.map_fig.colorbar(self.sea_quiver, cax=cax)
+            cbar.set_label('Current magnitude')
+        else:
+            # Update quiver plot
+            self.sea_quiver.set_UVC(U, V, magnitude)
+
+    def update_sea_currents(self, sea_currents: np.ndarray):
+        """Update the sea current vector field plot."""
+        if hasattr(self, 'sea_quiver') and self.sea_quiver is not None:
+            if self.map:
+                self.create_sea_currents_plot(sea_currents)
+            elif self.sim:
+                self._create_sim_sea_currents_plot(sea_currents)
+
+    def _create_sim_sea_currents_plot(self, sea_currents: np.ndarray):
+        """
+        Create a quiver plot showing sea current vector field for simulation plot.
+        
+        Args:
+            sea_currents: numpy array with shape (H, W, 2) or (T, H, W, 2)
+                         where the last dimension contains (u, v) velocity components
+        """
+        # Handle different input shapes
+        if sea_currents.ndim == 4:
+            # (T, H, W, 2) - take the first time step
+            field = sea_currents[0]
+        elif sea_currents.ndim == 3:
+            # (H, W, 2)
+            field = sea_currents
+        else:
+            raise ValueError(f"Expected sea_currents shape (H, W, 2) or (T, H, W, 2), got {sea_currents.shape}")
+        
+        H, W, _ = field.shape
+        
+        # Subsample for visualization
+        step = self.sea_currents_subsample
+        Y, X = np.mgrid[0:H:step, 0:W:step]
+        U = field[::step, ::step, 0]  # u component
+        V = field[::step, ::step, 1]  # v component
+        
+        # Compute magnitude for coloring
+        magnitude = np.sqrt(U**2 + V**2)
+        
+        if self.sea_quiver is None:
+            self.sea_quiver = self.sim_ax.quiver(
+                X, Y, U, V, magnitude,
+                cmap=DEFAULT_COLOR_MAP,
+                scale=None,  # auto-scale
+                alpha=0.5,   # more transparent for sim background
+                zorder=0     # behind other elements
+            )
+        else:
+            # Update quiver plot
+            self.sea_quiver.set_UVC(U, V, magnitude)
 
     @staticmethod
     def aggregate_nodes(nodes_expanded):

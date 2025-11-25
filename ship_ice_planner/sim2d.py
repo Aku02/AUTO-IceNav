@@ -263,12 +263,19 @@ def sim(
     if save_fig_dir:
         os.makedirs(save_fig_dir, exist_ok=True)
         print(f'Plots will be saved to: {save_fig_dir}')
+    
+    # Get sea currents data if using AISship model
+    sea_currents_data = None
+    if sim_dynamics.vessel_model_name == 'AISship':
+        sea_currents_data = sim_dynamics.vessel_model.sea_x[0].detach().numpy()  # (H, W, 2)
+    
     if cfg.anim.show or cfg.anim.save:
         plot = Plot(obstacles=obstacles, path=path.T, legend=False, track_fps=True, y_axis_limit=cfg.plot.y_axis_limit,
                     ship_vertices=cfg.ship.vertices, target=sim_dynamics.setpoint[:2], inf_stream=cfg.anim.inf_stream,
                     ship_pos=state.eta, map_figsize=None, sim_figsize=(10, 10), remove_sim_ticks=True, goal=goal[1],
                     save_fig_dir=save_fig_dir, map_shape=cfg.map_shape,
-                    save_animation=cfg.anim.save, anim_fps=cfg.anim.fps
+                    save_animation=cfg.anim.save, anim_fps=cfg.anim.fps,
+                    sea_currents=sea_currents_data, sea_currents_subsample=30
                     )
         def on_close(event):
             nonlocal running
@@ -919,10 +926,16 @@ def sim(
         sim_data = sim_dynamics.get_state_history()
 
         # make a plot showing the final state of the simulation
+        # Get updated sea currents if available
+        final_sea_currents = None
+        if sim_dynamics.vessel_model_name == 'AISship':
+            final_sea_currents = sim_dynamics.vessel_model.sea_x[0].detach().numpy()
+        
         plot = Plot(
             obstacles=get_global_obs_coords(poly_vertices, batched_data[:, :2], batched_data[:, 2]),
             path=path.T, goal=goal[1], map_figsize=None, remove_sim_ticks=False, show=False,
-            ship_pos=sim_data[['x', 'y']].to_numpy().T, map_shape=cfg.map_shape, legend=False
+            ship_pos=sim_data[['x', 'y']].to_numpy().T, map_shape=cfg.map_shape, legend=False,
+            sea_currents=final_sea_currents, sea_currents_subsample=30
         )
         plot.add_ship_patch(plot.sim_ax, cfg.ship.vertices, *state.eta)
         plot.save(save_fig_dir, TRIAL_SIM_PLOT)

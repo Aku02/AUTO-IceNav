@@ -33,7 +33,7 @@ class AISship:
             self.sea_step += 1
         i = int(y) % self.sea_x.shape[0]
         j = int(x) % self.sea_x.shape[1]
-        return self.sea_noise_strength * self.sea_x[0][i][j].detach().numpy()
+        return -self.sea_noise_strength * self.sea_x[0][i][j].detach().numpy()
         
     def __init__(self, seamap_path:str, seanet_path:str):
         """
