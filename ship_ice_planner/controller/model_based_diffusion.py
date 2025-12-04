@@ -90,7 +90,8 @@ class ModelBasedDiffusionController(NrcSupply):
                           nu_start: np.ndarray,
                           u_seq: np.ndarray,
                           dt: float,
-                          costmap=None) -> Tuple[np.ndarray, float, List[np.ndarray]]:
+                          costmap=None,
+                          goal_y: Optional[float] = None) -> Tuple[np.ndarray, float, List[np.ndarray]]:
         """
         Rollout a single trajectory given initial state and control sequence.
         Returns: (trajectory, total_reward, states_list)
@@ -143,11 +144,22 @@ class ModelBasedDiffusionController(NrcSupply):
             
             total_cost += coll_cost + ctrl_cost
         
-        # Terminal cost: encourage reaching goal (if goal_y provided via costmap)
-        # This will be handled in the objective function
+        # Goal-reaching reward (positive reward for making progress towards goal)
+        goal_reward = 0.0
+        if goal_y is not None:
+            # Terminal reward: strong incentive for reaching/nearing goal
+            final_y = trajectory[-1, 1]
+            distance_to_goal = abs(final_y - goal_y)
+            terminal_reward = 1000.0 / (1.0 + distance_to_goal)  # Large reward when close to goal
+            
+            # Progress reward: reward for making forward progress (y-increasing)
+            y_progress = trajectory[-1, 1] - eta_start[1]
+            progress_reward = max(0, y_progress) * 10.0  # Reward positive y movement
+            
+            goal_reward = terminal_reward + progress_reward
         
-        # Reward is negative of cost
-        total_reward = -total_cost
+        # Reward is negative of cost + positive goal rewards
+        total_reward = -total_cost + goal_reward
         
         return trajectory, total_reward, states_list
     
@@ -157,7 +169,8 @@ class ModelBasedDiffusionController(NrcSupply):
                           nu_start: np.ndarray,
                           local_path: Optional[np.ndarray],
                           dt: float,
-                          costmap=None) -> np.ndarray:
+                          costmap=None,
+                          goal_y: Optional[float] = None) -> np.ndarray:
         """
         Evaluate rewards for a batch of control sequences.
         Returns rewards (higher is better), not costs.
@@ -174,17 +187,17 @@ class ModelBasedDiffusionController(NrcSupply):
         
         for i in range(self.num_samples):
             trajectory, base_reward, states_list = self.rollout_trajectory(
-                eta_start, nu_start, u_seq_batch[i], dt, costmap
+                eta_start, nu_start, u_seq_batch[i], dt, costmap, goal_y=goal_y
             )
             
-            # Add path tracking reward if local_path provided
+            # Add path tracking reward if local_path provided (but don't let it dominate goal-seeking)
             path_reward = 0.0
             if local_path is not None:
                 for t in range(min(len(trajectory) - 1, len(local_path))):
                     pos_err = np.sum((trajectory[t+1, :2] - local_path[t, :2]) ** 2)
                     ang_err = trajectory[t+1, 2] - local_path[t, 2]
                     ang_err = (ang_err + np.pi) % (2 * np.pi) - np.pi
-                    path_reward -= (pos_err + 50.0 * ang_err ** 2)
+                    path_reward -= (pos_err + 50.0 * ang_err ** 2) * 0.1  # Reduced weight
             
             rewards[i] = base_reward + path_reward
         
@@ -197,7 +210,8 @@ class ModelBasedDiffusionController(NrcSupply):
                               nu_start: np.ndarray,
                               local_path: Optional[np.ndarray],
                               dt: float,
-                              costmap=None) -> Tuple[np.ndarray, float]:
+                              costmap=None,
+                              goal_y: Optional[float] = None) -> Tuple[np.ndarray, float]:
         """
         Single reverse diffusion step following the SDE formulation.
         
@@ -219,7 +233,7 @@ class ModelBasedDiffusionController(NrcSupply):
         Y0s = np.clip(Y0s, -2000, 2000)  # Clip to reasonable control limits
         
         # Evaluate trajectories and compute rewards
-        rewards = self.objective_function(Y0s, eta_start, nu_start, local_path, dt, costmap)
+        rewards = self.objective_function(Y0s, eta_start, nu_start, local_path, dt, costmap, goal_y=goal_y)
         
         # Normalize rewards
         rew_mean = rewards.mean()
@@ -253,7 +267,8 @@ class ModelBasedDiffusionController(NrcSupply):
                  dt: float,
                  nu: Optional[np.ndarray] = None,
                  local_path: Optional[np.ndarray] = None,
-                 costmap=None):
+                 costmap=None,
+                 goal_y: Optional[float] = None):
         """
         Main control function using model-based diffusion.
         
@@ -311,7 +326,7 @@ class ModelBasedDiffusionController(NrcSupply):
         Ybars = []
         for i in tqdm(range(self.num_diffusion_steps - 1, 0, -1), desc="Diffusing", leave=False):
             Ybar_i, rew = self.reverse_diffusion_step(
-                i, Ybar_i, pose, nu, local_path, dt, costmap
+                i, Ybar_i, pose, nu, local_path, dt, costmap, goal_y=goal_y
             )
             Ybars.append(Ybar_i)
         

@@ -138,8 +138,8 @@ def diffusion_planner(cfg, debug=False, **kwargs):
             # Generate path using diffusion controller
             t = time.time()
             
-            # Convert ship_pos back to meters for controller (ship_pos is already in meters from message dispatcher)
-            ship_pos_meters = ship_pos.copy()
+            # ship_pos is already in meters (we only scaled ship_pos_scaled), use it directly
+            ship_pos_meters = ship_pos.copy()  # Already in meters, no conversion needed
             
             # Set goal (goal is in meters, goal_y is in costmap scale)
             goal_pose = [goal[0], goal_y / costmap.scale, np.pi / 2]  # Convert goal_y back to meters
@@ -159,13 +159,16 @@ def diffusion_planner(cfg, debug=False, **kwargs):
             nu_start = [cfg.sim_dynamics.target_speed, 0.0, 0.0]  # Initial velocities
             
             try:
+                # Pass goal_y (in meters) to controller for goal-seeking behavior
+                goal_y_meters = goal_y / costmap.scale
                 controller.DPcontrol(
                     pose=ship_pos_meters,
                     setpoint=goal_pose,
                     dt=cfg.sim_dynamics.dt,
                     nu=nu_start,
                     local_path=local_path,
-                    costmap=costmap
+                    costmap=costmap,
+                    goal_y=goal_y_meters  # Pass goal for goal-seeking rewards
                 )
                 
                 # Get predicted trajectory
@@ -215,12 +218,14 @@ def diffusion_planner(cfg, debug=False, **kwargs):
             logger.info('Total compute time: {}'.format(compute_time[-1]))
             logger.info('Average compute time: {}'.format(np.mean(compute_time)))
             
-            metrics.store(dict(
-                replan_count=replan_count,
+            metrics.put_scalars(
+                iteration=replan_count,
                 compute_time=compute_time[-1],
                 path_length=len(path[0]),
                 stamp=t0
-            ))
+            )
+            logger.info(metrics.data)
+            metrics.step()
 
             # save path
             if path_dir:
@@ -295,6 +300,7 @@ def diffusion_planner(cfg, debug=False, **kwargs):
     finally:
         if md is not None:
             md.close()
+        return metrics.get_history() if metrics else []
 
 
 if __name__ == '__main__':
