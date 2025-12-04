@@ -11,3 +11,8 @@ except ImportError:
     pass
 
 from .straight import straight_planner
+
+try:
+    from .diffusion import diffusion_planner
+except ImportError:
+    pass
